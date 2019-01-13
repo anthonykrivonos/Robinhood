@@ -17,8 +17,11 @@ import six
 import dateutil
 
 #Application-specific imports
-import exceptions as RH_exception
-import endpoints
+from Robinhood import exceptions as RH_exception
+from Robinhood import endpoints
+
+# Quantico imports
+from utility import *
 
 class Bounds(Enum):
     """Enum for bounds in `historicals` endpoint """
@@ -166,8 +169,19 @@ class Robinhood:
         res.raise_for_status()  # will throw without auth
         data = res.json()
 
-        return data
+        return
 
+    def instruments_all(self):
+        """Fetch all instruments endpoint
+
+            Returns:
+                (:obj:`dict`): JSON contents from `instruments` endpoint
+        """
+        res = self.session.get(endpoints.instruments(), timeout=15)
+        res.raise_for_status()
+        res = res.json()
+
+        return res['results']
 
     def instruments(self, stock):
         """Fetch instruments endpoint
@@ -210,6 +224,8 @@ class Robinhood:
 
         return data['results']
 
+    def stock_from_instrument_url(self, url):
+        return self.session.get(url, timeout=15).json()
 
     def quote_data(self, stock=''):
         """Fetch stock quote
@@ -620,8 +636,11 @@ class Robinhood:
             Returns:
                 (List): a list of Ticker strings
         """
-        instrument_list = self.get_url(endpoints.tags(tag))["instruments"]
-        return [self.get_url(instrument)["symbol"] for instrument in instrument_list]
+        res = self.get_url(endpoints.tags(tag))
+        if 'instruments' in res:
+            instrument_list = res['instruments']
+            return [ self.get_url(instrument)["symbol"] for instrument in instrument_list ]
+        return res
 
     ###########################################################################
     #                           GET OPTIONS INFO
@@ -690,7 +709,6 @@ class Robinhood:
 
         return data
 
-
     def fundamentals(self, stock=''):
         """Wrapper for get_fundamentlals function """
 
@@ -700,6 +718,10 @@ class Robinhood:
     ###########################################################################
     #                           PORTFOLIOS DATA
     ###########################################################################
+
+    def stock_portfolio(self):
+        positions = self.positions()['results'] or []
+        return list(map(lambda position: Utility.merge_dicts(position, self.session.get(position['instrument'], timeout=15).json()), positions))
 
     def portfolios(self):
         """Returns the user's portfolio data """
@@ -1255,7 +1277,11 @@ class Robinhood:
         if(instrument_URL is None):
             if(symbol is None):
                 raise(ValueError('Neither instrument_URL nor symbol were passed to submit_order'))
-            instrument_URL = self.instruments(symbol)[0]['url']
+            instruments_LIST = self.instruments(symbol)
+            if len(instruments_LIST) > 0:
+                instrument_URL = self.instruments(symbol)[0]['url']
+            else:
+                raise(ValueError('The instrument likely does not exist'))
 
         if(symbol is None):
             symbol = self.session.get(instrument_URL, timeout=15).json()['symbol']
@@ -1330,8 +1356,6 @@ class Robinhood:
             ]:
             if(value is not None):
                 payload[field] = value
-
-        print(payload)
 
         res = self.session.post(endpoints.orders(), data=payload, timeout=15)
         res.raise_for_status()
